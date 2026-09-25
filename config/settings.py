@@ -6,10 +6,13 @@ Centralized settings for Autonomous Carbon-Aware Manufacturing Grid System.
 from pathlib import Path
 from typing import List, Tuple
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DB_PATH = BASE_DIR / "data" / "acmgs.db"
+CARBON_HIGH_THRESHOLD = 400.0
+CARBON_LOW_THRESHOLD = 150.0
 
 class Settings(BaseSettings):
     # System & App
@@ -89,9 +92,7 @@ class Settings(BaseSettings):
     HEALTH_INDEX_WARNING: float = 60.0
     HEALTH_INDEX_CRITICAL: float = 30.0
 
-    class Config:
-        env_file = ".env"
-        extra = "allow"
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
 def get_settings() -> Settings:

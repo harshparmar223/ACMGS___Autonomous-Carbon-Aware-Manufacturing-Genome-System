@@ -181,3 +181,58 @@ class CarbonScheduler:
 
 def get_carbon_scheduler() -> CarbonScheduler:
     return CarbonScheduler()
+
+
+def classify_carbon_zone(carbon_intensity: float) -> str:
+    """
+    Returns zone string: 'LOW', 'MEDIUM', or 'HIGH' matching dashboard conventions.
+    """
+    settings = get_settings()
+    if carbon_intensity < settings.CARBON_CLEAN_THRESHOLD:
+        return "LOW"
+    elif carbon_intensity <= settings.CARBON_CONSERVATION_THRESHOLD:
+        return "MEDIUM"
+    else:
+        return "HIGH"
+
+
+def get_recommendation(carbon_intensity: float) -> Dict:
+    """
+    Returns AI schedule recommendation dictionary continuously responding to grid carbon.
+    """
+    scheduler = get_carbon_scheduler()
+    decision = scheduler.evaluate_dispatch(carbon_intensity)
+    zone_str = classify_carbon_zone(carbon_intensity)
+
+    # Continuous scaling factor across 0 - 600 gCO2/kWh
+    c_norm = max(0.0, min(1.0, (carbon_intensity - 40.0) / 560.0))
+
+    # Dynamic machine kinetics adjusting to grid carbon
+    speed = round(3250.0 - 1350.0 * c_norm, 1)          # 3250 RPM (clean) -> 1900 RPM (dirty)
+    temp = round(68.5 - 12.5 * c_norm, 1)               # 68.5 C -> 56.0 C
+    pressure = round(14.0 - 5.0 * c_norm, 2)            # 14.0 bar -> 9.0 bar
+    feed = round(1.70 - 0.85 * c_norm, 2)               # 1.70 kg/min -> 0.85 kg/min
+
+    # Energy load shedding (kWh)
+    pred_energy = round(38.0 - 20.0 * c_norm, 1)        # 38.0 kWh -> 18.0 kWh
+    pred_carbon = round((pred_energy * carbon_intensity) / 1000.0, 2)
+
+    # Yield & Quality continuous responses
+    pred_yield = round(0.9880 - 0.025 * c_norm, 4)
+    pred_quality = round(0.9760 - 0.022 * c_norm, 4)
+
+    return {
+        "zone": zone_str,
+        "action": decision.scheduling_action,
+        "recommended_schedule": {
+            "temperature": temp,
+            "pressure": pressure,
+            "speed": speed,
+            "feed_rate": feed,
+            "pred_yield": pred_yield,
+            "pred_quality": pred_quality,
+            "pred_energy": pred_energy,
+            "pred_carbon": pred_carbon
+        }
+    }
+

@@ -8,7 +8,9 @@ from src.carbon_scheduler.scheduler import (
     CarbonScheduler,
     DispatchDecision,
     ScheduleRecommendation,
-    get_carbon_scheduler
+    get_carbon_scheduler,
+    classify_carbon_zone,
+    get_recommendation
 )
 
 __all__ = [
@@ -16,5 +18,7 @@ __all__ = [
     "CarbonScheduler",
     "DispatchDecision",
     "ScheduleRecommendation",
-    "get_carbon_scheduler"
+    "get_carbon_scheduler",
+    "classify_carbon_zone",
+    "get_recommendation"
 ]
