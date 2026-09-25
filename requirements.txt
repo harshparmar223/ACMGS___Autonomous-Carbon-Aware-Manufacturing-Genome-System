@@ -1,0 +1,50 @@
+# ACMGS — Autonomous Carbon-Aware Manufacturing Genome System
+# Dependencies Manifest
+# Install with: pip install -r requirements.txt
+
+# ── Core Data Science & Mathematics ──
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# ── Machine Learning & Predictive Modeling ──
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+shap>=0.44.0          # Explainable AI (XAI) for Root Cause Analysis (RCA)
+
+# ── Deep Learning (Energy DNA LSTM Autoencoder) ──
+torch>=2.0.0
+
+# ── Evolutionary Multi-Objective Optimization ──
+deap>=1.4.0           # NSGA-II Genetic Algorithm
+
+# ── Knowledge Graph & Lineage ──
+neo4j>=5.15.0         # Neo4j Graph Database Driver for Process Lineage
+
+# ── API Layer & Model Serving ──
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+requests>=2.31.0
+
+# ── Relational Database & Persistence ──
+# sqlite3 is built into Python standard library
+psycopg2-binary>=2.9.9 # PostgreSQL driver (for production DB deployment)
+
+# ── Cyber-Physical Dashboard & Digital Twin ──
+streamlit>=1.28.0
+plotly>=5.18.0
+
+# ── Visualization & Plotting ──
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# ── Hardware, Serial & Edge Communication ──
+pyserial>=3.5.0       # USB-Serial UART communication (ESP32 / Arduino)
+aiohttp>=3.8.0        # Async HTTP client for high-frequency ESP32 polling
+websockets>=11.0.0    # Real-time WebSocket streaming
+aiofiles>=23.0.0      # Non-blocking async file operations
+
+# ── Utilities & Logging ──
+python-dotenv>=1.0.0
+tqdm>=4.65.0
