@@ -21,9 +21,9 @@ logger = get_logger("BatchGenomeEncoder")
 
 
 class BatchGenomeEncoder:
-    PROCESS_COLUMNS = ["temp_c", "pressure_bar", "cycle_time_s", "motor_speed_rpm"]
+    PROCESS_COLUMNS = ["temp_c", "pressure_bar", "cycle_time_s", "motor_speed_rpm", "tool_wear_index"]
     MATERIAL_COLUMNS = ["material_density", "hardness_hrc", "feedstock_purity"]
-    GRID_COLUMNS = ["grid_carbon_intensity", "ambient_temp_c"]
+    GRID_COLUMNS = ["grid_carbon_intensity"]
 
     def __init__(self):
         self.settings = get_settings()
@@ -121,7 +121,7 @@ def build_and_save_genome_dataset() -> Tuple[np.ndarray, np.ndarray, np.ndarray]
         embeddings = np.load(emb_path)
 
     encoder = BatchGenomeEncoder()
-    logger.info("Fusing Process (4), Material (3), Energy DNA (16), and Grid (2) into 25-D Genome...")
+    logger.info("Fusing Process (5), Material (3), Energy DNA (16), and Grid (1) into 25-D Genome...")
     raw_genome = encoder.fuse_features(df_batches, embeddings)
 
     logger.info("Applying Z-Score standardization...")
