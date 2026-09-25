@@ -101,7 +101,7 @@ ACMGSji/
 
 ---
 
-## PHASE 1 — DATA SIMULATION (`src/data_simulation/simulator.py`)
+## PHASE 1 — DATA SIMULATION (`src/data_simulation/simulator.py`) COMPLETED
 
 ### Why This Phase Matters
 Without real factory access, physics-informed synthetic data generation provides realistic process kinematics, material variations, and dynamic machine power curves. Downstream models depend directly on this foundational physics.
@@ -135,7 +135,7 @@ Without real factory access, physics-informed synthetic data generation provides
 
 ---
 
-## PHASE 2 — ENERGY DNA MODEL (`src/energy_dna/`)
+## PHASE 2 — ENERGY DNA MODEL (`src/energy_dna/`)COMPLETED 
 
 ### Why This Phase Matters
 Every machine has a unique energy fingerprint. Raw 128-step time-series power profiles are high-dimensional and noisy. An unsupervised LSTM Autoencoder compresses the sequence into a compact 16-dimensional latent representation (the machine's "Energy DNA") while detecting mechanical wear through reconstruction error.
