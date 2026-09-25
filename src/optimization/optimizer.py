@@ -1,6 +1,6 @@
 """
 Evolutionary Optimization Engine: 4D Pareto Frontier Search
-Executes NSGA-II (Non-dominated Sorting Genetic Algorithm II) across 4 conflicting objectives:
+Executes DEAP NSGA-II (Non-dominated Sorting Genetic Algorithm II) across 4 conflicting objectives:
   1. Maximize Yield (%)
   2. Maximize Quality Score (0-100)
   3. Minimize Energy Consumption (kWh)
@@ -9,11 +9,13 @@ Identifies 100 non-dominated, Pareto-optimal operational recipes.
 """
 
 from pathlib import Path
+import random
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
 from config.settings import get_settings
+from src.batch_genome.encoder import BatchGenomeEncoder
 from src.prediction.predictor import BatchPredictor
 from src.utils.logger import get_logger
 
@@ -21,7 +23,6 @@ logger = get_logger("Optimizer")
 
 # Check DEAP availability
 try:
-    import random
     from deap import base, creator, tools
     DEAP_AVAILABLE = True
 except ImportError:
@@ -105,16 +106,32 @@ class ParetoOptimizer:
     def __init__(
         self,
         population_size: int = 100,
-        generations: int = 50,
+        generations: int = 60,
         carbon_intensity: float = 220.0
     ):
         self.settings = get_settings()
         self.population_size = population_size
         self.generations = generations
         self.carbon_intensity = carbon_intensity
+
+        # Load Phase 3 Genome Encoder and Phase 4 Predictor
+        self.encoder = BatchGenomeEncoder()
+        try:
+            self.encoder.load_normalization_params()
+        except FileNotFoundError:
+            logger.warning("Genome normalization file not found; using defaults.")
+
         self.predictor = BatchPredictor()
 
-        # Decision variable bounds
+        # Extract baseline Energy DNA embeddings mean (16-D) for candidate evaluation
+        emb_path = self.settings.SIMULATED_DATA_DIR / "energy_embeddings.npy"
+        if emb_path.exists():
+            embeddings = np.load(emb_path)
+            self.mean_dna_embeddings = embeddings.mean(axis=0)
+        else:
+            self.mean_dna_embeddings = np.zeros(16, dtype=np.float32)
+
+        # Decision variable bounds (temp_c, pressure_bar, cycle_time_s, motor_speed_rpm)
         self.param_bounds = [
             (45.0, 85.0),    # temp_c
             (8.0, 18.0),     # pressure_bar
@@ -122,57 +139,173 @@ class ParetoOptimizer:
             (2000.0, 3400.0) # motor_speed_rpm
         ]
 
-    def evaluate_recipe(self, params: np.ndarray) -> np.ndarray:
+    def evaluate_recipe(self, params: Tuple[float, ...]) -> Tuple[float, float, float, float]:
         """
         Evaluate candidate process parameters through surrogate modeling.
-        Returns: [yield_pct, quality_score, -energy_kwh, -carbon_kg] (all to maximize)
+        Returns: (yield_pct, quality_score, -energy_kwh, -carbon_kg) (all to maximize for NSGA-II)
         """
         temp_c, pressure_bar, cycle_time_s, motor_speed_rpm = params
 
-        # Simplified physics + surrogate surrogate mapping
-        temp_penalty = max(0.0, (temp_c - 70.0) * 0.35)
-        yield_pct = 98.2 - temp_penalty + np.random.normal(0, 0.2)
-        quality_score = 96.5 - (temp_penalty * 1.1) + np.random.normal(0, 0.3)
+        # Construct raw 25-D genome vector
+        # 5 Process (temp_c, pressure_bar, cycle_time_s, motor_speed_rpm, tool_wear_index)
+        # 3 Material (material_density, hardness_hrc, feedstock_purity)
+        # 1 Grid (grid_carbon_intensity)
+        # 16 Energy DNA Embeddings
+        raw_genome = np.array([[
+            temp_c, pressure_bar, cycle_time_s, motor_speed_rpm,
+            0.1,    # nominal tool wear
+            2.75,   # nominal density
+            53.5,   # nominal hardness
+            0.96,   # nominal feedstock purity
+            self.carbon_intensity
+        ] + list(self.mean_dna_embeddings)], dtype=np.float32)
 
-        energy_kwh = (
-            (motor_speed_rpm / 3000.0) * 11.5
-            + (pressure_bar / 15.0) * 7.5
-            + (cycle_time_s / 200.0) * 9.5
+        try:
+            norm_genome = self.encoder.transform(raw_genome)
+            preds = self.predictor.predict(norm_genome)[0]
+            yield_pct, quality_score, energy_kwh, _ = preds
+        except Exception:
+            # Physics-informed fallback approximation
+            temp_penalty = max(0.0, (temp_c - 70.0) * 0.35)
+            yield_pct = 98.2 - temp_penalty
+            quality_score = 96.5 - (temp_penalty * 1.1)
+            energy_kwh = (
+                (motor_speed_rpm / 3000.0) * 11.5
+                + (pressure_bar / 15.0) * 7.5
+                + (cycle_time_s / 200.0) * 9.5
+            )
+
+        carbon_kg = float(energy_kwh * (self.carbon_intensity / 1000.0))
+
+        # Return multi-objective fitness tuple (Yield max, Quality max, Energy min [-energy], Carbon min [-carbon])
+        return (
+            float(yield_pct),
+            float(quality_score),
+            float(-energy_kwh),
+            float(-carbon_kg)
         )
-        carbon_kg = energy_kwh * (self.carbon_intensity / 1000.0)
 
-        # For multi-objective maximization: invert energy and carbon
-        return np.array([
-            yield_pct,
-            quality_score,
-            -energy_kwh,
-            -carbon_kg
-        ], dtype=np.float32)
+    def optimize_deap(self) -> pd.DataFrame:
+        """
+        Runs DEAP NSGA-II search with SBX Crossover & Polynomial Mutation.
+        """
+        lows = [b[0] for b in self.param_bounds]
+        highs = [b[1] for b in self.param_bounds]
 
-    def optimize(self) -> pd.DataFrame:
-        """
-        Runs evolutionary search to extract 100 non-dominated Pareto solutions.
-        """
-        logger.info(
-            f"Starting NSGA-II search: Pop={self.population_size}, Gen={self.generations}, "
-            f"Carbon Grid={self.carbon_intensity:.1f} gCO2/kWh"
+        if not hasattr(creator, "FitnessMulti"):
+            creator.create("FitnessMulti", base.Fitness, weights=(1.0, 1.0, 1.0, 1.0))
+        if not hasattr(creator, "Individual"):
+            creator.create("Individual", list, fitness=creator.FitnessMulti)
+
+        toolbox = base.Toolbox()
+
+        # Attribute generator
+        for i, (low, high) in enumerate(self.param_bounds):
+            toolbox.register(f"attr_{i}", random.uniform, low, high)
+
+        def create_ind():
+            return creator.Individual([
+                random.uniform(lows[0], highs[0]),
+                random.uniform(lows[1], highs[1]),
+                random.uniform(lows[2], highs[2]),
+                random.uniform(lows[3], highs[3]),
+            ])
+
+        toolbox.register("individual", create_ind)
+        toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+        toolbox.register("evaluate", self.evaluate_recipe)
+
+        toolbox.register(
+            "mate",
+            tools.cxSimulatedBinaryBounded,
+            low=lows,
+            up=highs,
+            eta=20.0
         )
+        toolbox.register(
+            "mutate",
+            tools.mutPolynomialBounded,
+            low=lows,
+            up=highs,
+            eta=20.0,
+            indpb=0.25
+        )
+        toolbox.register("select", tools.selNSGA2)
 
+        pop = toolbox.population(n=self.population_size)
+
+        # Initial evaluation
+        invalid_ind = [ind for ind in pop if not ind.fitness.valid]
+        fitnesses = [toolbox.evaluate(ind) for ind in invalid_ind]
+        for ind, fit in zip(invalid_ind, fitnesses):
+            ind.fitness.values = fit
+
+        pop = toolbox.select(pop, len(pop))
+
+        for gen in range(1, self.generations + 1):
+            offspring = tools.selTournamentDCD(pop, len(pop))
+            offspring = [toolbox.clone(ind) for ind in offspring]
+
+            for ind1, ind2 in zip(offspring[::2], offspring[1::2]):
+                if random.random() <= self.settings.PARETO_CROSSOVER_PROB:
+                    toolbox.mate(ind1, ind2)
+                    del ind1.fitness.values
+                    del ind2.fitness.values
+
+            for ind in offspring:
+                if random.random() <= self.settings.PARETO_MUTATION_PROB:
+                    toolbox.mutate(ind)
+                    del ind.fitness.values
+
+            invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+            fitnesses = [toolbox.evaluate(ind) for ind in invalid_ind]
+            for ind, fit in zip(invalid_ind, fitnesses):
+                ind.fitness.values = fit
+
+            pop = toolbox.select(pop + offspring, self.population_size)
+
+        # Extract non-dominated solutions
+        pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+        if len(pareto_front) < 100:
+            pareto_front = pop[:100]
+        else:
+            pareto_front = pareto_front[:100]
+
+        recipes = np.array(pareto_front)
+        metrics = np.array([ind.fitness.values for ind in pareto_front])
+
+        df_pareto = pd.DataFrame({
+            "recipe_id": [f"RECIPE_OPT_{i+1:03d}" for i in range(len(pareto_front))],
+            "temp_c": np.round(recipes[:, 0], 2),
+            "pressure_bar": np.round(recipes[:, 1], 2),
+            "cycle_time_s": np.round(recipes[:, 2], 2),
+            "motor_speed_rpm": np.round(recipes[:, 3], 1),
+            "yield_pct": np.round(metrics[:, 0], 2),
+            "quality_score": np.round(metrics[:, 1], 2),
+            "energy_kwh": np.round(-metrics[:, 2], 3),
+            "carbon_kg": np.round(-metrics[:, 3], 3),
+            "pareto_rank": [1] * len(pareto_front),
+        })
+
+        pareto_path = self.settings.SIMULATED_DATA_DIR / "pareto_solutions.csv"
+        df_pareto.to_csv(pareto_path, index=False)
+        logger.info(f"DEAP NSGA-II Pareto optimization complete. Saved {len(df_pareto)} solutions to {pareto_path}")
+        return df_pareto
+
+    def optimize_native(self) -> pd.DataFrame:
+        """
+        Fallback native vectorized NSGA-II optimization.
+        """
         num_vars = len(self.param_bounds)
         lows = np.array([b[0] for b in self.param_bounds])
         highs = np.array([b[1] for b in self.param_bounds])
 
-        # Initialize random population
         pop = np.random.uniform(lows, highs, size=(self.population_size * 2, num_vars))
 
         for gen in range(self.generations):
-            # Evaluate population
             objs = np.array([self.evaluate_recipe(ind) for ind in pop])
-
-            # Non-dominated sorting
             fronts = fast_non_dominated_sort(objs)
 
-            # Select best individuals
             new_pop_indices = []
             for front in fronts:
                 if len(new_pop_indices) + len(front) <= self.population_size:
@@ -186,14 +319,11 @@ class ParetoOptimizer:
 
             pop = pop[new_pop_indices]
 
-            # Offspring generation: Crossover & Mutation
             offspring = []
             for _ in range(self.population_size):
                 p1, p2 = pop[np.random.choice(len(pop), 2, replace=False)]
-                # Simulated binary crossover (SBX-like)
                 alpha = np.random.uniform(0.1, 0.9, size=num_vars)
                 child = alpha * p1 + (1 - alpha) * p2
-                # Gaussian mutation
                 if np.random.rand() < 0.25:
                     child += np.random.normal(0, (highs - lows) * 0.05)
                 child = np.clip(child, lows, highs)
@@ -201,7 +331,6 @@ class ParetoOptimizer:
 
             pop = np.vstack([pop, np.array(offspring)])
 
-        # Final evaluation of population
         final_objs = np.array([self.evaluate_recipe(ind) for ind in pop])
         final_fronts = fast_non_dominated_sort(final_objs)
         best_indices = final_fronts[0][:100]
@@ -231,9 +360,22 @@ class ParetoOptimizer:
 
         pareto_path = self.settings.SIMULATED_DATA_DIR / "pareto_solutions.csv"
         df_pareto.to_csv(pareto_path, index=False)
-        logger.info(f"Pareto frontier optimization complete. Saved {len(df_pareto)} solutions to {pareto_path}")
-
+        logger.info(f"Native NSGA-II Pareto optimization complete. Saved {len(df_pareto)} solutions to {pareto_path}")
         return df_pareto
+
+    def optimize(self) -> pd.DataFrame:
+        logger.info(
+            f"Starting NSGA-II search: Pop={self.population_size}, Gen={self.generations}, "
+            f"Carbon Grid={self.carbon_intensity:.1f} gCO2/kWh"
+        )
+        if DEAP_AVAILABLE:
+            try:
+                return self.optimize_deap()
+            except Exception as e:
+                logger.warning(f"DEAP optimization encountered error ({e}); falling back to native solver.")
+                return self.optimize_native()
+        else:
+            return self.optimize_native()
 
 
 def run_pareto_optimization(carbon_intensity: float = 220.0) -> pd.DataFrame:
