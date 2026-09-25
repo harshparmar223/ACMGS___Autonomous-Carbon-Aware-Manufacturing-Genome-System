@@ -31,7 +31,7 @@ class BatchPredictor:
         self.model: Optional[MultiOutputRegressor] = None
         self.metrics: Optional[Dict[str, Dict[str, float]]] = None
 
-        if self.model_path.exists():
+        if self.model_path.exists() and self.model_path.stat().st_size > 0:
             self.load()
 
     def train(self, X: np.ndarray, y: np.ndarray, test_size: float = 0.2) -> Dict[str, Dict[str, float]]:
@@ -108,9 +108,9 @@ class BatchPredictor:
         logger.info(f"Predictor metrics saved to {self.metrics_path}")
 
     def load(self):
-        if self.model_path.exists():
+        if self.model_path.exists() and self.model_path.stat().st_size > 0:
             self.model = joblib.load(self.model_path)
-            if self.metrics_path.exists():
+            if self.metrics_path.exists() and self.metrics_path.stat().st_size > 0:
                 self.metrics = joblib.load(self.metrics_path)
             logger.info(f"Loaded predictor model from {self.model_path}")
 

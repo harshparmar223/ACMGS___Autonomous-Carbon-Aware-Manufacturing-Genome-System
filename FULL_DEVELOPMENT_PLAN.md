@@ -44,7 +44,7 @@ Before writing code, a complete mental map and folder structure ensures modulari
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │                        API LAYER (Phase 8)                             │
 │   /predict  /optimize  /schedule  /sensors/telemetry  /control/actuate │
-└───┬──────────────┬────────────────┬───────────────┬────────────────────┘
+└───┬──────────────┬────────────────┬──────────────┬────────────────────┘
     │              │                │               │
     ▼              ▼                ▼               ▼
 ┌────────┐  ┌───────────┐   ┌───────────┐   ┌───────────────┐
@@ -64,7 +64,7 @@ Before writing code, a complete mental map and folder structure ensures modulari
   ┌─────────────┐            ┌──────────────┐           ┌──────────────┐
   │ ENERGY DNA  │            │   PROCESS    │           │   CARBON     │
   │ MODEL       │            │   PARAMS     │           │   INTENSITY  │
-  │ Phase 2     │            │   (raw data) │           │   (external) │
+  │ Phase 2     │            │   (raw data) │           │   (pexternal) │
   └──────┬──────┘            └──────────────┘           └──────────────┘
          │
   ┌──────▼──────┐
